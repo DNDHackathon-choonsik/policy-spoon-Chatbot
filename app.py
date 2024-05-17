@@ -17,12 +17,13 @@ huggingface_token = os.getenv('HUGGINGFACE_TOKEN')
 
 app = FastAPI()
 
-rag_tokenizer = RagTokenizer.from_pretrained("facebook/rag-sequence-nq", token=huggingface_token, trust_remote_code=True, force_download=True)
-rag_retriever = RagRetriever.from_pretrained("custom_rag_retriever", token=huggingface_token, trust_remote_code=True, force_download=True)
-rag_model = RagModel.from_pretrained("facebook/rag-sequence-nq", token=huggingface_token, trust_remote_code=True, force_download=True)
+rag_tokenizer = RagTokenizer.from_pretrained("facebook/rag-sequence-nq", token=huggingface_token, force_download=True)
+rag_retriever = RagRetriever.from_pretrained("custom_rag_retriever", token=huggingface_token, force_download=True)
+rag_model = RagModel.from_pretrained("facebook/rag-sequence-nq", token=huggingface_token, force_download=True)
 phi_tokenizer = AutoTokenizer.from_pretrained("microsoft/Phi-3-mini-4k-instruct", token=huggingface_token, trust_remote_code=True, force_download=True)
-phi_model = AutoModelForCausalLM.from_pretrained("microsoft/Phi-3-mini-4k-instruct", token=huggingface_token, trust_remote_code=True, 
-    attn_implementation='eager', force_download=True)
+phi_model = AutoModelForCausalLM.from_pretrained("microsoft/Phi-3-mini-4k-instruct", token=huggingface_token, trust_remote_code=True,
+    attn_implementation='eager',
+    force_download=True)
 
 dataset_path = "custom_dataset_with_embeddings"
 dataset = load_from_disk(dataset_path)
@@ -48,11 +49,9 @@ def generate_answer(query: Query):
 
         inputs = rag_tokenizer(query.question, return_tensors="pt").to(device)
         input_ids = inputs.input_ids
-
         logger.info("Tokenized input_ids: %s", input_ids)
 
         question_hidden_states = rag_model.question_encoder(input_ids)[0]
-
         logger.info("Encoded question hidden states: %s", question_hidden_states.shape)
 
         question_hidden_states_np = question_hidden_states.detach().cpu().numpy()
@@ -61,7 +60,6 @@ def generate_answer(query: Query):
         logger.info("Calling retriever with question_input_ids: %s and question_hidden_states: %s", question_input_ids_np, question_hidden_states_np)
 
         retrieved_docs = rag_retriever(question_input_ids=question_input_ids_np, question_hidden_states=question_hidden_states_np)
-
         logger.info("Retrieved documents: %s", retrieved_docs)
 
         if not retrieved_docs or 'doc_ids' not in retrieved_docs:
@@ -90,7 +88,7 @@ def generate_answer(query: Query):
         logger.info("Context input for Phi model: %s", phi_input_text)
 
         with torch.no_grad():
-            outputs = phi_model.generate(phi_input_ids, num_return_sequences=1, num_beams=3, max_length=512, eos_token_id=phi_tokenizer.eos_token_id)
+            outputs = phi_model.generate(phi_input_ids, num_return_sequences=1, num_beams=3, max_length=150, eos_token_id=phi_tokenizer.eos_token_id)
         answer = phi_tokenizer.decode(outputs[0], skip_special_tokens=True)
 
         answer = answer.replace(phi_input_text, "").strip()
@@ -107,7 +105,7 @@ def generate_answer(query: Query):
         phi_input_ids = phi_tokenizer(query.question, return_tensors="pt", padding=True, truncation=True, max_length=512).input_ids.to(device)
 
         with torch.no_grad():
-            outputs = phi_model.generate(phi_input_ids, num_return_sequences=1, num_beams=3, max_length=512, eos_token_id=phi_tokenizer.eos_token_id)
+            outputs = phi_model.generate(phi_input_ids, num_return_sequences=1, num_beams=3, max_length=150, eos_token_id=phi_tokenizer.eos_token_id)
         answer = phi_tokenizer.decode(outputs[0], skip_special_tokens=True)
 
         answer = postprocess_output(answer)
