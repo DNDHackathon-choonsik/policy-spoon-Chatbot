@@ -34,27 +34,27 @@ app.add_middleware(
 rag_tokenizer = None
 rag_retriever = None
 rag_model = None
-distilgpt2_tokenizer = None
-distilgpt2_model = None
+gpt2_tokenizer = None
+gpt2_model = None
 dataset = None
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # GPU로 설정
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def initialize_models():
-    global rag_tokenizer, rag_retriever, rag_model, distilgpt2_tokenizer, distilgpt2_model, dataset
+    global rag_tokenizer, rag_retriever, rag_model, gpt2_tokenizer, gpt2_model, dataset
 
     rag_tokenizer = RagTokenizer.from_pretrained("facebook/rag-sequence-nq", use_auth_token=huggingface_token)
     rag_retriever = RagRetriever.from_pretrained("custom_rag_retriever", use_auth_token=huggingface_token)
     rag_model = RagModel.from_pretrained("facebook/rag-sequence-nq", use_auth_token=huggingface_token)
-    distilgpt2_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
-    distilgpt2_model = AutoModelForCausalLM.from_pretrained("distilgpt2")
+    gpt2_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
+    gpt2_model = AutoModelForCausalLM.from_pretrained("distilgpt2")
 
-    distilgpt2_tokenizer.pad_token = distilgpt2_tokenizer.eos_token  # Set the padding token to eos_token
+    gpt2_tokenizer.pad_token = gpt2_tokenizer.eos_token
 
     dataset_path = "custom_dataset_with_embeddings"
     dataset = load_from_disk(dataset_path)
 
     rag_model.to(device)
-    distilgpt2_model.to(device)
+    gpt2_model.to(device)
 
 initialize_models()
 
@@ -67,6 +67,12 @@ def postprocess_output(text):
         if text[i] in end_punctuation:
             return text[:i + 1]
     return text
+
+def clean_context(context):
+    context = context.replace("Title: No Title\n", "")
+    context = context.replace("Description: ", "")
+    context = context.replace("More Info: No URL\n", "")
+    return context
 
 @app.post("/generate")
 def generate_answer(query: Query):
@@ -110,19 +116,19 @@ def generate_answer(query: Query):
             contexts.append(context)
 
         detailed_context = "\n\n".join(contexts)
+        cleaned_context = clean_context(detailed_context)
 
-        distilgpt2_input_text = f"Context: {detailed_context}\n\nQuestion: {query.question}\n\nAnswer:"
-        distilgpt2_input_ids = distilgpt2_tokenizer(distilgpt2_input_text, return_tensors="pt", padding=True, truncation=True, max_length=256).input_ids.to(device)
+        gpt2_input_text = f"Context: {cleaned_context}\n\nQuestion: {query.question}\n\nAnswer:"
+        gpt2_input_ids = gpt2_tokenizer(gpt2_input_text, return_tensors="pt", padding=True, truncation=True, max_length=512).input_ids.to(device)
 
-        logger.info("Context input for distilgpt2 model: %s", distilgpt2_input_text)
+        logger.info("Context input for GPT-2 model: %s", gpt2_input_text)
 
         torch.cuda.empty_cache()
 
         with autocast():
             with torch.no_grad():
-                outputs = distilgpt2_model.generate(distilgpt2_input_ids, num_return_sequences=1, num_beams=3, max_new_tokens=150, eos_token_id=distilgpt2_tokenizer.eos_token_id)
-        answer = distilgpt2_tokenizer.decode(outputs[0], skip_special_tokens=True)
-
+                outputs = gpt2_model.generate(gpt2_input_ids, num_return_sequences=1, num_beams=3, max_new_tokens=150, eos_token_id=gpt2_tokenizer.eos_token_id)
+        answer = gpt2_tokenizer.decode(outputs[0], skip_special_tokens=True)
         answer = postprocess_output(answer)
 
         logger.info("Generated answer: %s", answer)
@@ -140,8 +146,8 @@ def generate_answer(query: Query):
 
 def clean_up_resources():
     logger.info("Cleaning up resources...")
-    global rag_tokenizer, rag_retriever, rag_model, distilgpt2_tokenizer, distilgpt2_model, dataset
-    del rag_tokenizer, rag_retriever, rag_model, distilgpt2_tokenizer, distilgpt2_model, dataset
+    global rag_tokenizer, rag_retriever, rag_model, gpt2_tokenizer, gpt2_model, dataset
+    del rag_tokenizer, rag_retriever, rag_model, gpt2_tokenizer, gpt2_model, dataset
     gc.collect()
     torch.cuda.empty_cache()
 
