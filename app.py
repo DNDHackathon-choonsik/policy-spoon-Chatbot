@@ -3,13 +3,13 @@ import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from transformers import RagTokenizer, RagRetriever, RagModel
+from transformers import RagTokenizer, RagRetriever, RagModel, AutoTokenizer, AutoModelForCausalLM
 from dotenv import load_dotenv
-import openai
 import torch
 import numpy as np
 import atexit
 from datasets import load_from_disk
+from torch.cuda.amp import autocast
 import gc
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 huggingface_token = os.getenv('HUGGINGFACE_TOKEN')
-openai.api_key = os.getenv('OPENAI_API_KEY')
 
 app = FastAPI(root_path="/proxy/8000")
 
@@ -35,20 +34,27 @@ app.add_middleware(
 rag_tokenizer = None
 rag_retriever = None
 rag_model = None
+distilgpt2_tokenizer = None
+distilgpt2_model = None
 dataset = None
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # GPU로 설정
 
 def initialize_models():
-    global rag_tokenizer, rag_retriever, rag_model, dataset
+    global rag_tokenizer, rag_retriever, rag_model, distilgpt2_tokenizer, distilgpt2_model, dataset
 
     rag_tokenizer = RagTokenizer.from_pretrained("facebook/rag-sequence-nq", use_auth_token=huggingface_token)
     rag_retriever = RagRetriever.from_pretrained("custom_rag_retriever", use_auth_token=huggingface_token)
     rag_model = RagModel.from_pretrained("facebook/rag-sequence-nq", use_auth_token=huggingface_token)
+    distilgpt2_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
+    distilgpt2_model = AutoModelForCausalLM.from_pretrained("distilgpt2")
+
+    distilgpt2_tokenizer.pad_token = distilgpt2_tokenizer.eos_token  # Set the padding token to eos_token
 
     dataset_path = "custom_dataset_with_embeddings"
     dataset = load_from_disk(dataset_path)
 
     rag_model.to(device)
+    distilgpt2_model.to(device)
 
 initialize_models()
 
@@ -105,25 +111,23 @@ def generate_answer(query: Query):
 
         detailed_context = "\n\n".join(contexts)
 
-        gpt3_input_text = f"Context: {detailed_context}\n\nQuestion: {query.question}\n\nAnswer:"
+        distilgpt2_input_text = f"Context: {detailed_context}\n\nQuestion: {query.question}\n\nAnswer:"
+        distilgpt2_input_ids = distilgpt2_tokenizer(distilgpt2_input_text, return_tensors="pt", padding=True, truncation=True, max_length=256).input_ids.to(device)
 
-        logger.info("Context input for GPT-3 model: %s", gpt3_input_text)
+        logger.info("Context input for distilgpt2 model: %s", distilgpt2_input_text)
 
-        response = openai.Completion.create(
-            engine="text-davinci-003",
-            prompt=gpt3_input_text,
-            max_tokens=150,
-            n=1,
-            stop=None,
-            temperature=0.7,
-        )
+        torch.cuda.empty_cache()
 
-        answer = response.choices[0].text.strip()
+        with autocast():
+            with torch.no_grad():
+                outputs = distilgpt2_model.generate(distilgpt2_input_ids, num_return_sequences=1, num_beams=3, max_new_tokens=150, eos_token_id=distilgpt2_tokenizer.eos_token_id)
+        answer = distilgpt2_tokenizer.decode(outputs[0], skip_special_tokens=True)
+
         answer = postprocess_output(answer)
 
         logger.info("Generated answer: %s", answer)
 
-        del inputs, input_ids, question_hidden_states, retrieved_docs
+        del inputs, input_ids, question_hidden_states, retrieved_docs, outputs
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -136,8 +140,8 @@ def generate_answer(query: Query):
 
 def clean_up_resources():
     logger.info("Cleaning up resources...")
-    global rag_tokenizer, rag_retriever, rag_model, dataset
-    del rag_tokenizer, rag_retriever, rag_model, dataset
+    global rag_tokenizer, rag_retriever, rag_model, distilgpt2_tokenizer, distilgpt2_model, dataset
+    del rag_tokenizer, rag_retriever, rag_model, distilgpt2_tokenizer, distilgpt2_model, dataset
     gc.collect()
     torch.cuda.empty_cache()
 
