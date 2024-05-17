@@ -13,22 +13,28 @@ huggingface_token = os.getenv('HUGGINGFACE_TOKEN')
 with open('youth_policy_dataset.json', 'r') as f:
     data = json.load(f)
 
+combined_texts = [
+    item['text'] for item in data['policies']
+]
+
+titles = [
+    item.get('polyBizSjnm', 'No Title') for item in data['policies']
+]
+
 data_dict = {
-    'title': [item['polyBizSjnm'] for item in data['policies']],
-    'text': [item['polyItcnCn'] for item in data['policies']],
-    'category': [item['category'] for item in data['policies']],
-    'support': [item['sporCn'] for item in data['policies']]
+    'title': titles,
+    'text': combined_texts
 }
 
 dataset = Dataset.from_dict(data_dict)
 
-tokenizer = RagTokenizer.from_pretrained("facebook/rag-sequence-nq", token=huggingface_token, trust_remote_code=True)
-model = RagModel.from_pretrained("facebook/rag-sequence-nq", token=huggingface_token, trust_remote_code=True, attn_implementation='eager')
+tokenizer = RagTokenizer.from_pretrained("facebook/rag-sequence-nq", use_auth_token=huggingface_token)
+model = RagModel.from_pretrained("facebook/rag-sequence-nq", use_auth_token=huggingface_token)
 
 def embed(text):
     inputs = tokenizer(text, return_tensors="pt", truncation=True, padding="max_length", max_length=512)
     with torch.no_grad():
-        outputs = model.question_encoder(input_ids=inputs.input_ids)
+        outputs = model.question_encoder(input_ids=inputs.input_ids, attention_mask=inputs.attention_mask)
         embeddings = outputs[0].squeeze().cpu().numpy()
     return embeddings
 
@@ -39,17 +45,15 @@ print(f"Sample embedding shape: {sample_vector.shape}")
 dimension = sample_vector.shape[0]
 index = faiss.IndexFlatL2(dimension)
 
-vectors = np.vstack([embed(q) for q in data_dict['title']])  # Stack to 2D array
+vectors = np.vstack([embed(text) for text in combined_texts])
 index.add(vectors)
 
 faiss.write_index(index, "custom_faiss_index")
 
 dataset_with_embeddings = {
-    'title': data_dict['title'],
-    'text': data_dict['text'],
-    'category': data_dict['category'],
-    'support': data_dict['support'],
-    'embeddings': [embed(q).tolist() for q in data_dict['title']]  # Keep as 1D
+    'title': titles,
+    'text': combined_texts,
+    'embeddings': [embed(text).tolist() for text in combined_texts]
 }
 
 for i, emb in enumerate(dataset_with_embeddings['embeddings']):
@@ -58,8 +62,6 @@ for i, emb in enumerate(dataset_with_embeddings['embeddings']):
 features = Features({
     'title': Value('string'),
     'text': Value('string'),
-    'category': Value('string'),
-    'support': Value('string'),
     'embeddings': Sequence(Value('float32'))
 })
 

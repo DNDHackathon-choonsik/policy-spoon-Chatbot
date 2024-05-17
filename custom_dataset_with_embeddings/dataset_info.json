@@ -10,14 +10,6 @@
       "dtype": "string",
       "_type": "Value"
     },
-    "category": {
-      "dtype": "string",
-      "_type": "Value"
-    },
-    "support": {
-      "dtype": "string",
-      "_type": "Value"
-    },
     "embeddings": {
       "feature": {
         "dtype": "float32",

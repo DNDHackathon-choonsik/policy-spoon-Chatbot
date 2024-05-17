@@ -1,6 +1,7 @@
 import os
 import logging
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from transformers import RagTokenizer, RagRetriever, RagModel, AutoTokenizer, AutoModelForCausalLM
 from dotenv import load_dotenv
@@ -8,6 +9,9 @@ import torch
 import numpy as np
 import atexit
 from datasets import load_from_disk
+from torch.cuda.amp import autocast
+
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,13 +21,19 @@ huggingface_token = os.getenv('HUGGINGFACE_TOKEN')
 
 app = FastAPI()
 
-rag_tokenizer = RagTokenizer.from_pretrained("facebook/rag-sequence-nq", token=huggingface_token, force_download=True)
-rag_retriever = RagRetriever.from_pretrained("custom_rag_retriever", token=huggingface_token, force_download=True)
-rag_model = RagModel.from_pretrained("facebook/rag-sequence-nq", token=huggingface_token, force_download=True)
-phi_tokenizer = AutoTokenizer.from_pretrained("microsoft/Phi-3-mini-4k-instruct", token=huggingface_token, trust_remote_code=True, force_download=True)
-phi_model = AutoModelForCausalLM.from_pretrained("microsoft/Phi-3-mini-4k-instruct", token=huggingface_token, trust_remote_code=True,
-    attn_implementation='eager',
-    force_download=True)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+rag_tokenizer = RagTokenizer.from_pretrained("facebook/rag-sequence-nq", use_auth_token=huggingface_token)
+rag_retriever = RagRetriever.from_pretrained("custom_rag_retriever", use_auth_token=huggingface_token)
+rag_model = RagModel.from_pretrained("facebook/rag-sequence-nq", use_auth_token=huggingface_token)
+phi_tokenizer = AutoTokenizer.from_pretrained("microsoft/Phi-3-mini-4k-instruct", use_auth_token=huggingface_token, trust_remote_code=True)
+phi_model = AutoModelForCausalLM.from_pretrained("microsoft/Phi-3-mini-4k-instruct", use_auth_token=huggingface_token, trust_remote_code=True, attn_implementation='eager')
 
 dataset_path = "custom_dataset_with_embeddings"
 dataset = load_from_disk(dataset_path)
@@ -73,25 +83,31 @@ def generate_answer(query: Query):
         if valid_doc_ids.size == 0:
             raise ValueError("No valid document IDs found in retrieved documents.")
 
-        doc_id = valid_doc_ids[0]
-        doc = dataset[int(doc_id)]
+        contexts = []
+        for doc_id in valid_doc_ids:
+            doc = dataset[int(doc_id)]
+            context = (
+                f"Title: {doc['title']}\n"
+                f"Description: {doc['text']}\n"
+                f"More Info: {doc.get('url', 'No URL')}\n"
+            )
+            contexts.append(context)
 
-        if not doc:
-            raise ValueError(f"Document with ID {doc_id} not found.")
+        detailed_context = "\n\n".join(contexts)
 
-        retrieved_text = doc['text']
-        retrieved_support = doc['support']
-
-        phi_input_text = f"Context: {retrieved_text}\n\nSupport: {retrieved_support}\n\nQuestion: {query.question}\n\nAnswer:"
-        phi_input_ids = phi_tokenizer(phi_input_text, return_tensors="pt", padding=True, truncation=True, max_length=512).input_ids.to(device)
+        phi_input_text = f"Context: {detailed_context}\n\nQuestion: {query.question}\n\nAnswer:"
+        phi_input_ids = phi_tokenizer(phi_input_text, return_tensors="pt", padding=True, truncation=True, max_length=256).input_ids.to(device)
 
         logger.info("Context input for Phi model: %s", phi_input_text)
 
-        with torch.no_grad():
-            outputs = phi_model.generate(phi_input_ids, num_return_sequences=1, num_beams=3, max_length=150, eos_token_id=phi_tokenizer.eos_token_id)
+        torch.cuda.empty_cache()  # Clear unnecessary GPU memory
+
+        with autocast():  # Mixed precision inference
+            outputs = phi_model.generate(phi_input_ids, num_return_sequences=1, num_beams=3, max_new_tokens=150, eos_token_id=phi_tokenizer.eos_token_id)
         answer = phi_tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-        answer = answer.replace(phi_input_text, "").strip()
+        if "Answer:" in answer:
+            answer = answer.split("Answer:")[1].strip()
 
         answer = postprocess_output(answer)
 
@@ -102,12 +118,13 @@ def generate_answer(query: Query):
     except ValueError as e:
         logger.warning("RAG retriever failed, falling back to language model: %s", str(e))
 
-        phi_input_ids = phi_tokenizer(query.question, return_tensors="pt", padding=True, truncation=True, max_length=512).input_ids.to(device)
+        torch.cuda.empty_cache()  # Clear unnecessary GPU memory
 
-        with torch.no_grad():
-            outputs = phi_model.generate(phi_input_ids, num_return_sequences=1, num_beams=3, max_length=150, eos_token_id=phi_tokenizer.eos_token_id)
+        phi_input_ids = phi_tokenizer(query.question, return_tensors="pt", padding=True, truncation=True, max_length=256).input_ids.to(device)
+
+        with autocast():  # Mixed precision inference
+            outputs = phi_model.generate(phi_input_ids, num_return_sequences=1, num_beams=3, max_new_tokens=150, eos_token_id=phi_tokenizer.eos_token_id)
         answer = phi_tokenizer.decode(outputs[0], skip_special_tokens=True)
-
         answer = postprocess_output(answer)
 
         logger.info("Generated answer using language model: %s", answer)
