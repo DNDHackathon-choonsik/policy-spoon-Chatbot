@@ -30,7 +30,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 전역 변수 선언
 rag_tokenizer = None
 rag_retriever = None
 rag_model = None
@@ -48,7 +47,6 @@ def initialize_models():
     gpt2_tokenizer = AutoTokenizer.from_pretrained("gpt2", use_auth_token=huggingface_token)
     gpt2_model = AutoModelForCausalLM.from_pretrained("gpt2", use_auth_token=huggingface_token)
 
-    # 패딩 토큰 설정
     gpt2_tokenizer.pad_token = gpt2_tokenizer.eos_token
 
     dataset_path = "custom_dataset_with_embeddings"
@@ -76,6 +74,7 @@ def generate_answer(query: Query):
 
         inputs = rag_tokenizer(query.question, return_tensors="pt").to(device)
         input_ids = inputs.input_ids
+        attention_mask = inputs.attention_mask
         logger.info("Tokenized input_ids: %s", input_ids)
 
         question_hidden_states = rag_model.question_encoder(input_ids)[0]
@@ -113,7 +112,9 @@ def generate_answer(query: Query):
         detailed_context = "\n\n".join(contexts)
 
         gpt2_input_text = f"Context: {detailed_context}\n\nQuestion: {query.question}\n\nAnswer:"
-        gpt2_input_ids = gpt2_tokenizer(gpt2_input_text, return_tensors="pt", padding=True, truncation=True, max_length=256).input_ids.to(device)
+        gpt2_inputs = gpt2_tokenizer(gpt2_input_text, return_tensors="pt", padding=True, truncation=True, max_length=256)
+        gpt2_input_ids = gpt2_inputs.input_ids.to(device)
+        gpt2_attention_mask = gpt2_inputs.attention_mask.to(device)
 
         logger.info("Context input for GPT-2 model: %s", gpt2_input_text)
 
@@ -121,7 +122,14 @@ def generate_answer(query: Query):
 
         with autocast():
             with torch.no_grad():
-                outputs = gpt2_model.generate(gpt2_input_ids, num_return_sequences=1, num_beams=3, max_new_tokens=150, eos_token_id=gpt2_tokenizer.eos_token_id)
+                outputs = gpt2_model.generate(
+                    gpt2_input_ids, 
+                    attention_mask=gpt2_attention_mask,
+                    num_return_sequences=1, 
+                    num_beams=3, 
+                    max_new_tokens=150, 
+                    eos_token_id=gpt2_tokenizer.eos_token_id
+                )
         answer = gpt2_tokenizer.decode(outputs[0], skip_special_tokens=True)
 
         if "Answer:" in answer:
@@ -131,7 +139,7 @@ def generate_answer(query: Query):
 
         logger.info("Generated answer: %s", answer)
 
-        del inputs, input_ids, question_hidden_states, retrieved_docs, outputs
+        del inputs, input_ids, attention_mask, question_hidden_states, retrieved_docs, outputs
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -142,17 +150,26 @@ def generate_answer(query: Query):
 
         torch.cuda.empty_cache()
 
-        gpt2_input_ids = gpt2_tokenizer(query.question, return_tensors="pt", padding=True, truncation=True, max_length=256).input.ids.to(device)
+        gpt2_inputs = gpt2_tokenizer(query.question, return_tensors="pt", padding=True, truncation=True, max_length=512)
+        gpt2_input_ids = gpt2_inputs.input_ids.to(device)
+        gpt2_attention_mask = gpt2_inputs.attention_mask.to(device)
 
         with autocast():
             with torch.no_grad():
-                outputs = gpt2_model.generate(gpt2_input_ids, num_return_sequences=1, num_beams=3, max_new_tokens=150, eos_token_id=gpt2_tokenizer.eos_token_id)
+                outputs = gpt2_model.generate(
+                    gpt2_input_ids, 
+                    attention_mask=gpt2_attention_mask,
+                    num_return_sequences=1, 
+                    num_beams=3, 
+                    max_new_tokens=512, 
+                    eos_token_id=gpt2_tokenizer.eos_token_id
+                )
         answer = gpt2_tokenizer.decode(outputs[0], skip_special_tokens=True)
         answer = postprocess_output(answer)
 
         logger.info("Generated answer using language model: %s", answer)
 
-        del gpt2_input_ids, outputs
+        del gpt2_input_ids, gpt2_attention_mask, outputs
         gc.collect()
         torch.cuda.empty_cache()
 
