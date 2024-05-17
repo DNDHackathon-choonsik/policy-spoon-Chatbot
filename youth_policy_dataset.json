@@ -1,0 +1,71 @@
+{
+    "policies": [
+      {
+        "bizId": "123456",
+        "polyBizSjnm": "청년 구직활동 지원금",
+        "polyItcnCn": "취업을 준비하는 청년들에게 구직활동 지원금을 지급합니다.",
+        "sporCn": "월 50만원 지원, 취업 컨설팅 제공",
+        "ageInfo": "18-34",
+        "polyRlmCd": "023010",
+        "mngtMson": "고용노동부",
+        "rqutUrla": "https://www.moel.go.kr/",
+        "category": "일자리 분야"
+      },
+      {
+        "bizId": "654321",
+        "polyBizSjnm": "청년 창업 지원금",
+        "polyItcnCn": "청년 창업자에게 자금을 지원하여 초기 사업 성장을 도모합니다.",
+        "sporCn": "최대 1억원 지원, 창업 멘토링",
+        "ageInfo": "18-39",
+        "polyRlmCd": "023030",
+        "mngtMson": "중소벤처기업부",
+        "rqutUrla": "https://www.mss.go.kr/",
+        "category": "교육 분야"
+      },
+      {
+        "bizId": "987654",
+        "polyBizSjnm": "청년 주거 지원",
+        "polyItcnCn": "청년들의 안정적인 주거 환경을 지원합니다.",
+        "sporCn": "월세 지원, 전세자금 대출",
+        "ageInfo": "18-34",
+        "polyRlmCd": "023020",
+        "mngtMson": "국토교통부",
+        "rqutUrla": "https://www.molit.go.kr/",
+        "category": "주거 분야"
+      },
+      {
+        "bizId": "192837",
+        "polyBizSjnm": "청년 문화 활동 지원",
+        "polyItcnCn": "청년들의 문화 활동을 지원합니다.",
+        "sporCn": "문화 상품권 제공, 공연 티켓 할인",
+        "ageInfo": "18-29",
+        "polyRlmCd": "023040",
+        "mngtMson": "문화체육관광부",
+        "rqutUrla": "https://www.mcst.go.kr/",
+        "category": "복지.문화 분야"
+      },
+      {
+        "bizId": "564738",
+        "polyBizSjnm": "청년 인권 보호 지원",
+        "polyItcnCn": "청년들의 인권을 보호하고 지원합니다.",
+        "sporCn": "법률 상담, 인권 교육",
+        "ageInfo": "18-34",
+        "polyRlmCd": "023050",
+        "mngtMson": "법무부",
+        "rqutUrla": "https://www.moj.go.kr/",
+        "category": "참여.권리 분야"
+      },
+      {
+        "bizId": "918273",
+        "polyBizSjnm": "청년 건강 지원",
+        "polyItcnCn": "청년들의 건강 관리를 지원합니다.",
+        "sporCn": "건강 검진, 심리 상담",
+        "ageInfo": "18-34",
+        "polyRlmCd": "023040",
+        "mngtMson": "보건복지부",
+        "rqutUrla": "https://www.mohw.go.kr/",
+        "category": "복지.문화 분야"
+      }
+    ]
+  }
+  
