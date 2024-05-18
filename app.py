@@ -30,7 +30,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 전역 변수 선언
 rag_tokenizer = None
 rag_retriever = None
 rag_model = None
